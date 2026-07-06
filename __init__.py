@@ -1,6 +1,6 @@
 bl_info = {
     "name": "Gravity UV",
-    "author": "Твоё Имя & Senior AI",
+    "author": "mexanik01",
     "version": (5, 0),
     "blender": (5, 1, 0),
     "location": "View3D > Sidebar > Gravity UV",
