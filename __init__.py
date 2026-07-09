@@ -11,18 +11,13 @@ bl_info = {
 import bpy
 
 # Логика автоперезагрузки модулей при повторном включении аддона в Blender
-if "bpy" in locals():
+if "operators" in locals():
     import importlib
-    if "properties" in locals():
-        importlib.reload(properties)
-    if "operators" in locals():
-        importlib.reload(operators)
-    if "ui" in locals():
-        importlib.reload(ui)
-    if "material" in locals():
-        importlib.reload(material)
-    if "core" in locals():
-        importlib.reload(core)
+    importlib.reload(properties)
+    importlib.reload(operators)
+    importlib.reload(ui)
+    importlib.reload(material)
+    importlib.reload(core)
 else:
     from . import properties
     from . import operators

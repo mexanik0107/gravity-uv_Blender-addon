@@ -14,20 +14,48 @@ class UV_OT_gravity_unwrap(bpy.types.Operator):
     def execute(self, context):
         meshes = [obj for obj in context.selected_objects if obj.type == 'MESH']
         if not meshes:
-            self.report({'WARNING'}, "Не выделено ни одного 3D-объекта!")
+            self.report({'WARNING'}, "Не выделено ни одного полигонального объекта!")
             return {'CANCELLED'}
             
         original_active = context.view_layer.objects.active
-        for obj in meshes:
-            context.view_layer.objects.active = obj
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.uv.select_all(action='SELECT')
-            bpy.ops.uv.unwrap(margin=0.02)
-            bmesh.update_edit_mesh(obj.data)
-            
+        original_mode = context.active_object.mode if context.active_object else 'OBJECT'
+        
+        # Сохраняем исходное выделение
+        saved_selection = list(context.selected_objects)
+        
+        # Снимаем выделение со всех объектов, кроме мешей
+        for obj in saved_selection:
+            if obj.type != 'MESH':
+                obj.select_set(False)
+                
+        # Делаем активным первый меш
+        context.view_layer.objects.active = meshes[0]
+        
+        # Переходим в режим редактирования (войдет сразу для всех выделенных мешей)
+        bpy.ops.object.mode_set(mode='EDIT')
+        
+        # Выделяем все UV и разворачиваем
+        bpy.ops.uv.select_all(action='SELECT')
+        bpy.ops.uv.unwrap(margin=0.02)
+        
+        # Возвращаем режим и активный объект
+        bpy.ops.object.mode_set(mode='OBJECT') # Сначала переходим в Object Mode для восстановления исходного состояния
+        
         if original_active:
             context.view_layer.objects.active = original_active
-            bpy.ops.object.mode_set(mode='OBJECT')
+        if original_mode != 'OBJECT':
+            try:
+                bpy.ops.object.mode_set(mode=original_mode)
+            except:
+                pass
+            
+        # Восстанавливаем оригинальное выделение
+        for obj in saved_selection:
+            try:
+                obj.select_set(True)
+            except:
+                pass
+                
         return {'FINISHED'}
 
 class UV_OT_gravity_align(bpy.types.Operator):

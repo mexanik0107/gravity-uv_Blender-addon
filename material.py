@@ -2,6 +2,22 @@ import bpy
 import math
 import os
 
+def get_mix_input(node, name, default_idx):
+    socket = node.inputs.get(name)
+    if socket:
+        return socket
+    if default_idx < len(node.inputs):
+        return node.inputs[default_idx]
+    return None
+
+def get_mix_output(node):
+    if len(node.outputs) == 1:
+        return node.outputs[0]
+    # Для Blender 3.4-3.6 выход Color лежит на индексе 2
+    if len(node.outputs) > 2:
+        return node.outputs[2]
+    return node.outputs[0]
+
 def setup_gravity_material(obj, scene):
     """
     Создает или обновляет временный материал для предпросмотра Gravity_UV на объекте.
@@ -68,9 +84,17 @@ def setup_gravity_material(obj, scene):
                 
         tex_mix = nodes.new(type="ShaderNodeMix")
         tex_mix.data_type = 'RGBA'
-        tex_mix.inputs[0].default_value = 1.0 if scene.show_debug_arrows else 0.0
-        links.new(user_tex.outputs['Color'], tex_mix.inputs[6])
-        links.new(arrow_tex.outputs['Color'], tex_mix.inputs[7])
+        
+        tex_mix_fac = get_mix_input(tex_mix, 'Factor', 0)
+        tex_mix_a = get_mix_input(tex_mix, 'A', 6)
+        tex_mix_b = get_mix_input(tex_mix, 'B', 7)
+        
+        if tex_mix_fac:
+            tex_mix_fac.default_value = 1.0 if scene.show_debug_arrows else 0.0
+        if tex_mix_a:
+            links.new(user_tex.outputs['Color'], tex_mix_a)
+        if tex_mix_b:
+            links.new(arrow_tex.outputs['Color'], tex_mix_b)
         
         # 3. Встроенные предупреждающие полосы
         flat_tex = nodes.new(type="ShaderNodeTexImage")
@@ -89,8 +113,15 @@ def setup_gravity_material(obj, scene):
         
         final_mix = nodes.new(type="ShaderNodeMix")
         final_mix.data_type = 'RGBA'
-        links.new(tex_mix.outputs[2], final_mix.inputs[6])
-        links.new(flat_tex.outputs['Color'], final_mix.inputs[7])
+        
+        final_mix_fac = get_mix_input(final_mix, 'Factor', 0)
+        final_mix_a = get_mix_input(final_mix, 'A', 6)
+        final_mix_b = get_mix_input(final_mix, 'B', 7)
+        
+        if final_mix_a:
+            links.new(get_mix_output(tex_mix), final_mix_a)
+        if final_mix_b:
+            links.new(flat_tex.outputs['Color'], final_mix_b)
         
         if scene.show_flat_highlight:
             try:
@@ -105,14 +136,17 @@ def setup_gravity_material(obj, scene):
                 links.new(geom.outputs['Normal'], sep.inputs['Vector'])
                 links.new(sep.outputs['Z'], math_abs.inputs[0])
                 links.new(math_abs.outputs[0], math_comp.inputs[0])
-                links.new(math_comp.outputs[0], final_mix.inputs[0])
+                if final_mix_fac:
+                    links.new(math_comp.outputs[0], final_mix_fac)
             except:
-                final_mix.inputs[0].default_value = 0.0
+                if final_mix_fac:
+                    final_mix_fac.default_value = 0.0
         else:
-            final_mix.inputs[0].default_value = 0.0
+            if final_mix_fac:
+                final_mix_fac.default_value = 0.0
             
         if bsdf:
-            links.new(final_mix.outputs[2], bsdf.inputs['Base Color'])
+            links.new(get_mix_output(final_mix), bsdf.inputs['Base Color'])
             
         if not obj.data.materials:
             obj.data.materials.append(mat)

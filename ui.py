@@ -15,7 +15,15 @@ class UV_PT_gravity_panel(bpy.types.Panel):
         scene = context.scene
         obj = context.active_object
         
-        if not obj or obj.type != 'MESH':
+        selected_meshes = [o for o in context.selected_objects if o.type == 'MESH']
+        
+        # Умное определение: если активный объект не меш, но выделен хотя бы один меш,
+        # используем первый выделенный меш для индивидуальных настроек
+        if obj and obj.type == 'MESH':
+            active_mesh = obj
+        elif selected_meshes:
+            active_mesh = selected_meshes[0]
+        else:
             layout.label(text="Выберите полигональный объект", icon='ERROR')
             return
             
@@ -26,7 +34,26 @@ class UV_PT_gravity_panel(bpy.types.Panel):
         box_action = layout.box()
         box_action.label(text="2. Выравнивание (Создать 2-й канал):", icon='WORLD_DATA')
         box_action.operator("uv.gravity_align", text="Выровнять по Гравитации", icon='OBJECT_DATA')
-        box_action.prop(scene, "gravity_uv_coplanar_threshold", text="Искривление плоскости")
+        
+        box_action.separator()
+        box_action.prop(scene, "gravity_uv_rotation_mode", text="Режим работы")
+        
+        # Опции плоскостного режима
+        if scene.gravity_uv_rotation_mode == 'COPLANAR':
+            box_action.prop(scene, "gravity_uv_coplanar_threshold", text="Искривление плоскости")
+            box_action.prop(scene, "gravity_uv_use_xy_projection", text="Проекция сверху вниз (XY)")
+            
+        box_action.prop(scene, "gravity_uv_split_on_twist", text="Контроль сложной геометрии")
+        if scene.gravity_uv_split_on_twist:
+            box_action.prop(scene, "gravity_uv_twist_threshold", text="Порог закручивания")
+            
+        # 3D Направление потеков
+        box_action.separator()
+        box_action.label(text="Направление потеков (3D):", icon='FORCE_WIND')
+        col_dir = box_action.column(align=True)
+        col_dir.prop(scene, "gravity_uv_direction_x", text="Ось X (Влево/Вправо)")
+        col_dir.prop(scene, "gravity_uv_direction_y", text="Ось Y (Вперед/Назад)")
+        col_dir.prop(scene, "gravity_uv_direction_z", text="Ось Z (Вверх/Вниз)")
         
         # Интерактивные галочки под кнопкой генерации
         box_action.separator()
@@ -46,15 +73,13 @@ class UV_PT_gravity_panel(bpy.types.Panel):
         if scene.flat_faces_mode == 'ALIGN':
             box_flat.prop(scene, "flat_faces_angle", text="Угол поворота")
             
-        selected_meshes = [o for o in context.selected_objects if o.type == 'MESH']
-        
         box_mesh = layout.box()
         box_mesh.label(text="5. Настройки меша:", icon='MESH_DATA')
         
         if len(selected_meshes) <= 1:
-            box_mesh.prop(obj, "gravity_uv_use_local_coplanar", text="Собственное искривление")
-            if obj.gravity_uv_use_local_coplanar:
-                box_mesh.prop(obj, "gravity_uv_local_coplanar_threshold", text="Искривление плоскости")
+            box_mesh.prop(active_mesh, "gravity_uv_use_local_coplanar", text="Собственное искривление")
+            if active_mesh.gravity_uv_use_local_coplanar:
+                box_mesh.prop(active_mesh, "gravity_uv_local_coplanar_threshold", text="Искривление плоскости")
         else:
             local_meshes = [o for o in selected_meshes if o.gravity_uv_use_local_coplanar]
             if local_meshes:
@@ -66,4 +91,4 @@ class UV_PT_gravity_panel(bpy.types.Panel):
                     row.prop(o, "gravity_uv_use_local_coplanar", text="", icon='CANCEL')
             else:
                 box_mesh.label(text="Индивидуальные настройки не заданы", icon='INFO')
-                box_mesh.prop(obj, "gravity_uv_use_local_coplanar", text=f"Включить для активного ({obj.name})")
+                box_mesh.prop(active_mesh, "gravity_uv_use_local_coplanar", text=f"Включить для активного ({active_mesh.name})")
