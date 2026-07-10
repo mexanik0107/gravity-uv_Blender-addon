@@ -535,11 +535,35 @@ def pack_uv_islands_keep_scale(meshes, scene, context, original_active):
     """
     Упаковывает UV-островки всех выделенных мешей вместе без изменения масштаба,
     после чего обновляет кэш (сохраняет новые упакованные координаты в uv_orig).
+    Работает через стабильный Object Mode и NumPy для исключения багов кэширования bmesh.
     """
     if not meshes:
         return
         
-    # Делаем активным один из мешей для Edit Mode
+    # Шаг 1: Замеряем исходный масштаб в Object Mode (до входа в Edit Mode)
+    ref_data = None
+    for obj in meshes:
+        gravity_uv = obj.data.uv_layers.get("Gravity_UV")
+        if not gravity_uv:
+            continue
+        for poly in obj.data.polygons:
+            if len(poly.loop_indices) >= 2:
+                l1 = poly.loop_indices[0]
+                l2 = poly.loop_indices[1]
+                uv1 = Vector(gravity_uv.data[l1].uv)
+                uv2 = Vector(gravity_uv.data[l2].uv)
+                dist = (uv2 - uv1).length
+                if dist > 0.0001:
+                    ref_data = {
+                        'obj_name': obj.name,
+                        'loop_indices': (l1, l2),
+                        'dist_old': dist
+                    }
+                    break
+        if ref_data:
+            break
+            
+    # Шаг 2: Входим в Edit Mode для выполнения упаковки
     if original_active in meshes:
         context.view_layer.objects.active = original_active
     else:
@@ -550,41 +574,25 @@ def pack_uv_islands_keep_scale(meshes, scene, context, original_active):
     for obj in meshes:
         obj.data.uv_layers.active = obj.data.uv_layers["Gravity_UV"]
         
-    # Поиск двух точек для замера масштаба
-    ref_data = None
-    for obj in meshes:
-        bm = bmesh.from_edit_mesh(obj.data)
-        uv_layer = bm.loops.layers.uv.get("Gravity_UV")
-        if not uv_layer:
-            continue
-        for face in bm.faces:
-            if len(face.loops) >= 2:
-                uv1 = face.loops[0][uv_layer].uv.copy()
-                uv2 = face.loops[1][uv_layer].uv.copy()
-                dist = (uv2 - uv1).length
-                if dist > 0.0001:
-                    ref_data = {
-                        'obj_name': obj.name,
-                        'face_index': face.index,
-                        'dist_old': dist
-                    }
-                    break
-        if ref_data:
-            break
-            
     bpy.ops.uv.select_all(action='SELECT')
-    bpy.ops.uv.pack_islands(rotate=False, margin=0.01)
+    # Упаковываем без изменения относительного масштаба островков и с фиксированным UV-отступом
+    try:
+        bpy.ops.uv.pack_islands(rotate=False, scale=False, margin_method='ADD', margin=0.01)
+    except TypeError:
+        # Резервный вариант для старых версий Blender, где нет margin_method
+        bpy.ops.uv.pack_islands(rotate=False, scale=False, margin=0.01)
     
-    # Восстановление масштаба
+    # Шаг 3: Выходим в Object Mode для гарантированного обновления данных меша
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    # Шаг 4: Замеряем новый масштаб в Object Mode и восстанавливаем его через NumPy
     if ref_data:
         ref_obj = bpy.data.objects.get(ref_data['obj_name'])
         if ref_obj:
-            bm_ref = bmesh.from_edit_mesh(ref_obj.data)
-            uv_layer_ref = bm_ref.loops.layers.uv.get("Gravity_UV")
-            bm_ref.faces.ensure_lookup_table()
-            face = bm_ref.faces[ref_data['face_index']]
-            uv1 = face.loops[0][uv_layer_ref].uv
-            uv2 = face.loops[1][uv_layer_ref].uv
+            gravity_uv = ref_obj.data.uv_layers.get("Gravity_UV")
+            l1, l2 = ref_data['loop_indices']
+            uv1 = Vector(gravity_uv.data[l1].uv)
+            uv2 = Vector(gravity_uv.data[l2].uv)
             dist_new = (uv2 - uv1).length
             
             if dist_new > 0.00001:
@@ -592,17 +600,16 @@ def pack_uv_islands_keep_scale(meshes, scene, context, original_active):
                 if abs(scale_factor - 1.0) > 0.0001:
                     inv_scale = 1.0 / scale_factor
                     for o in meshes:
-                        bm_o = bmesh.from_edit_mesh(o.data)
-                        uv_lay = bm_o.loops.layers.uv.get("Gravity_UV")
-                        for f in bm_o.faces:
-                            for l in f.loops:
-                                l[uv_lay].uv *= inv_scale
-                        bmesh.update_edit_mesh(o.data)
-                        
-    bpy.ops.object.mode_set(mode='OBJECT')
-    
-    # Важно: после упаковки координаты островков изменились.
-    # Обновляем сохраненную uv_orig в кэше, чтобы решатель Фазы Б работал на основе новой упаковки!
+                        gov = o.data.uv_layers.get("Gravity_UV")
+                        if gov:
+                            num_loops = len(o.data.loops)
+                            uvs = np.empty(num_loops * 2, dtype=np.float32)
+                            gov.data.foreach_get("uv", uvs)
+                            uvs *= inv_scale
+                            gov.data.foreach_set("uv", uvs)
+                            o.data.update()
+                            
+    # Шаг 5: Обновляем кэш оригинальных координат в памяти
     for obj in meshes:
         cache = get_gravity_uv_cache(obj)
         if cache:
@@ -611,10 +618,8 @@ def pack_uv_islands_keep_scale(meshes, scene, context, original_active):
             obj.data.uv_layers["Gravity_UV"].data.foreach_get("uv", uv_packed)
             uv_packed.shape = (num_loops, 2)
             
-            # Сохраняем новые координаты как оригинальные для последующего вращения
             cache.uv_orig = uv_packed
             
-            # Пересчитываем центроиды для обновленной развертки
             island_uv_sums = np.zeros((cache.num_islands, 2), dtype=np.float32)
             np.add.at(island_uv_sums, cache.loop_island_ids, uv_packed)
             island_loop_counts = np.zeros(cache.num_islands, dtype=np.float32)
